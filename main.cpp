@@ -11,14 +11,14 @@ unordered_map<string, int> labelTable;
 
 string ltrim(string s) {
     size_t i = 0;
-    while (i < s.length() && isspace((unsigned char)s[i])) i++;
+    while (i < s.length() && isspace(static_cast<unsigned char>(s[i]))) i++;
     s.erase(0, i);
     return s;
 }
 
 string rtrim(string s) {
     size_t i = s.length();
-    while (i > 0 && isspace((unsigned char)s[i - 1])) i--;
+    while (i > 0 && isspace(static_cast<unsigned char>(s[i]))) i--;
     s.erase(i);
     return s;
 }
@@ -41,6 +41,7 @@ auto loadFile(string fileName){
             if (!t.empty()) r.push_back(t);
         }
     }
+    asmFile.close();
     return r;
 }
 
