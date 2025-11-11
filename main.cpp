@@ -62,8 +62,8 @@ auto splitAt(const  char  c, string  s){
     vector<string>  r;
     int  n;
     while ((n  =  s.find(c))  != string::npos){
-        string t  = s.substr(0, n);
-        r.push_back(t);
+        string t  = trim(s.substr(0, n));
+        if (!t.empty()) r.push_back(t);
         s.erase(0, n);
     }
     return r;
@@ -86,6 +86,10 @@ void storeLable (vector<string>v){
     }
 }
 
+void handleData(vector<string>v){
+
+}
+
 int main(){
     string a;
     getline(cin, a);
@@ -94,15 +98,15 @@ int main(){
         cout << s << '\n';
     }
     cout << endl;
-    //handle .data and remove it form v
+    //handle .data and remove it form v and insert it 
 
     //lable with semicolen removed
     storeLable(v);
     
     vector<vector<string>> instrc;
+    for(string s : v){
+        instrc.push_back(splitAt(' ',s));
+    }
     
-
-
-
     return 0;
 }
