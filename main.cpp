@@ -119,7 +119,7 @@ unordered_map<string, string> uj_format = {
 };
 
 unordered_map<string, int> dataSize = {
-    {".byte", 1}, {".half", 2} , {".word", 4}, {".dword",8}, {".asciz",1}
+    {".byte", 1}, {".half", 2} , {".word", 4}, {".dword",8}, {".asciiz",1}
 };
 
 unordered_map<string, int> labelTable;
@@ -127,16 +127,39 @@ unordered_map<string, int> labelTable;
 const  int  dataStart = 0x10000000;
 const int stackStart =  0x7FFFFFDC;
 
+int intToBinaryChar(char *buffer,const unsigned int size, const int n){
+    int arr[size];
+    bool isNeg = (n<0);
+    int x = (isNeg) ? ((-n) - 1) : n;
+    int temp;
+    for (int i = 0; i < size; i++){
+        temp = x%2;
+        if (isNeg){
+            if (temp == 0) arr[size-i-1] = 1;
+            else arr[size-i-1] = 0;
+        }
+        else {
+            arr[size-i-1] = temp;
+        }
+        x=x/2;
+    }
+    for (int i = 0; i < size; i++){
+        buffer[i] = (arr[i] == 0) ? '0' : '1';
+    }
+    buffer[size] = '\0';
+    return (isNeg) ? ((-n) - 1) : n;
+}
+
 string ltrim(string s) {
     size_t i = 0;
-    while (i < s.length() && isspace(static_cast<unsigned char>(s[i]))) i++;
+    while (i < s.length() && (isspace(static_cast<unsigned char>(s[i])) || static_cast<unsigned char>(s[i] == '\r'))) i++;
     s.erase(0, i);
     return s;
 }
 
 string rtrim(string s) {
     size_t i = s.length();
-    while (i > 0 && isspace(static_cast<unsigned char>(s[i]))) i--;
+    while (i > 0 && (isspace(static_cast<unsigned char>(s[i])) || static_cast<unsigned char>(s[i] == '\r'))) i--;
     s.erase(i);
     return s;
 }
@@ -151,6 +174,7 @@ auto loadFile(string fileName){
     asmFile.open(fileName);
     if (!asmFile.is_open()){
         cout << "error reading from file. are you sure the file exist?" << '\n';
+        exit(-9);
     }
     else {
         string t;
@@ -164,33 +188,71 @@ auto loadFile(string fileName){
 }
 
 string replaceChar(const char r,  const char t, string s){  // r gets repolaced by t
-    for   (int  i =  0; i < s.length(); i++){
-        if (s[i] ==  r) s[i] =  t;
+    bool operate = true;
+    char l = '\0';
+    for(int  i =  0; i < s.length(); i++){
+        if (s[i] == '\'' || s[i] == '\"'){
+            if (operate){
+                l = s[i];
+                operate = !(operate);
+            }
+            else if (s[i] == l){
+                l = '\0';
+                operate = !(operate);
+            }
+        }
+        if (s[i] ==  r && operate) s[i] =  t;
     }
     return s;
 }
 
-auto splitAt(const  char  c, string  s){
+auto splitAt(const char c, string s) {
     vector<string> r;
-    size_t n;
+    bool inQuotes = false;
+    char quoteChar = '\0';
+    string current;
 
-    while ((n = s.find(c)) != string::npos) {
-        string t = s.substr(0, n);
-        t = trim(t);
-        if (!t.empty()) r.push_back(t);
-        s.erase(0, n + 1);
+    for (size_t i = 0; i < s.size(); i++) {
+        char ch = s[i];
+
+        // Handle quote toggling
+        if (ch == '\'' || ch == '"') {
+            if (!inQuotes) {
+                inQuotes = true;
+                quoteChar = ch;
+            } else if (ch == quoteChar) {
+                inQuotes = false;
+                quoteChar = '\0';
+            }
+            current += ch;
+        }
+        // Split only if outside quotes
+        else if (!inQuotes && ch == c) {
+            string t = trim(current);
+            if (!t.empty()) r.push_back(t);
+            current.clear();
+        }
+        else {
+            current += ch;
+        }
     }
 
-    if (!s.empty()) r.push_back(s);
+    // push last token
+    if (!current.empty()) {
+        string t = trim(current);
+        if (!t.empty()) r.push_back(t);
+    }
+
     return r;
 }
 
-void storeLable (vector<string>v){
+
+void storeLable (vector<string>& v){
     int n = v.size();
     for(int i=0;i<n; i++){
         int j= v[i].find(':');
         if (j==string::npos) continue;
-        string l=v[i].substr(0,i-1);
+        string l=trim(v[i].substr(0,j));
         v[i].erase(0, j+1);
         v[i]= trim(v[i]);
        if(v[i].empty()) {
@@ -198,7 +260,7 @@ void storeLable (vector<string>v){
             i--;
             n--;
         }
-       labelTable.insert({l,i+1});
+       labelTable.insert({l,4 * (i+1)});
     }
 }
 
@@ -206,22 +268,34 @@ int convertToDecimal(const string &num) {
     if (num.empty()) return 0;
     else if (num.find("0x") == 0) return stoi(num.substr(2), nullptr, 16);
     else if (num.find("0b") == 0) return stoi(num.substr(2), nullptr, 2);
-    else return 0;
-    return stoi(num);
+    else return stoi(num);
 }
 
-string binToHex(string machineInstruction){
+string binToHex(string machineInstruction, bool padRight = false) {
+
+    size_t len = machineInstruction.length();
+    size_t rem = len % 4;
+    if (rem != 0) {
+        size_t pad = 4 - rem;
+        if (padRight)
+            machineInstruction.append(pad, '0');
+        else
+            machineInstruction.insert(0, pad, '0');
+    }
+
     ostringstream machineInstructionHex;
-    char mcHex[20];
-    for (int i = 0; i < 32; i+=4){
+    char mcHex[9] = {};
+    mcHex[8] = '\0';
+
+    for (size_t i = 0; i < machineInstruction.length(); i += 4) {
         string sTemp = machineInstruction.substr(i, 4);
-        uint32_t iTemp = stoi(machineInstruction, nullptr, 2);
-        //int iTemp;
-        sprintf(mcHex + i, "%x", iTemp);
+        uint32_t iTemp = stoi(sTemp, nullptr, 2);
+        sprintf(mcHex, "%x", iTemp);
         machineInstructionHex << mcHex;
     }
     return machineInstructionHex.str();
 }
+
 
 string handle_r(const vector<string>& i){
     string opcode, rd, rs1, rs2, funct3, funct7;
@@ -244,8 +318,8 @@ string handle_i(const vector<string>& i){
     rs1 = registers[i[2]];
     imm = i[3];
     int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
-    char buffer[20];
-    sprintf(buffer, "%b", iImm);
+    char buffer[33];
+    intToBinaryChar(buffer, 32, iImm);
     imm = buffer;
     while (imm.length() < 12) imm = "0" + imm;
     if (imm.length() > 12) imm.erase(0, imm.length() - 12);
@@ -271,8 +345,8 @@ string handle_il(const vector<string>& j){
     rs1 = registers[i[3]];
     imm = i[2];
     int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
-    char buffer[20];
-    sprintf(buffer, "%b", iImm);
+    char buffer[33];
+    intToBinaryChar(buffer, 32, iImm);
     imm = buffer;
     while (imm.length() < 12) imm = "0" + imm;
     if (imm.length() > 12) imm.erase(0, imm.length() - 12);
@@ -298,8 +372,8 @@ string handle_s(const vector<string>& j){
     rs2 = registers[i[1]];
     imm = i[2];
     int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
-    char buffer[20];
-    sprintf(buffer, "%b", iImm);
+    char buffer[33];
+    intToBinaryChar(buffer, 32, iImm);
     imm = buffer;
     while (imm.length() < 12) imm = "0" + imm;
     if (imm.length() > 12) imm.erase(0, imm.length() - 12);
@@ -317,12 +391,12 @@ string handle_sb(const vector<string>& i){
     rs1 = registers[i[2]];
     imm = i[3];
     int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
-    char buffer[20];
-    sprintf(buffer, "%b", iImm);
+    char buffer[33];
+    intToBinaryChar(buffer, 32, iImm);
     imm = buffer;
     while (imm.length() < 13) imm = "0" + imm;
     if (imm.length() > 13) imm.erase(0, imm.length() - 13);
-    string machineInstruction = imm[0] + imm.substr(2, 6) + rs2 + rs1 + funct3 + imm.substr(8, 4) + imm[1] + opcode;
+    string machineInstruction = string(1, imm[0]) + imm.substr(2, 6) + rs2 + rs1 + funct3 + imm.substr(8, 4) + string(1, imm[1]) + opcode;
     ostringstream r;
     string machineInstructionHexStr = binToHex(machineInstruction);
     r << "0x" << machineInstructionHexStr << " , " << i[0] << " " << i[1] << ',' << i[2] << ',' << i[3] << " # " << opcode << "-" << funct3 << "-" << "NULL" << "-" << "NULL" << "-" << rs1 << "-" << rs2 << "-" << imm << endl;
@@ -335,8 +409,8 @@ string handle_u(const vector<string>& i){
     rd = registers[i[1]];
     imm = i[2];
     int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
-    char buffer[20];
-    sprintf(buffer, "%b", iImm);
+    char buffer[33];
+    intToBinaryChar(buffer, 32, iImm);
     imm = buffer;
     while (imm.length() < 20) imm = "0" + imm;
     if (imm.length() > 20) imm.erase(0, imm.length() - 20);
@@ -349,18 +423,20 @@ string handle_u(const vector<string>& i){
 
 string handle_uj(const vector<string>& i){
     string opcode, rd, imm;
-    opcode = u_format[i[0]];
+    opcode = uj_format[i[0]];
     rd = registers[i[1]];
     imm = i[2];
     int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
-    char buffer[20];
-    sprintf(buffer, "%b", iImm);
+    char buffer[33];
+    intToBinaryChar(buffer, 32, iImm);
     imm = buffer;
     while (imm.length() < 21) imm = "0" + imm;
     if (imm.length() > 21) imm.erase(0, imm.length() - 21);
-    string machineInstruction = imm[0] + imm.substr(10, 10) + imm[9] + imm.substr(1,8) + rd + opcode;
+    string machineInstruction = string(1, imm[0]) + imm.substr(10, 10) + string(1, imm[9]) + imm.substr(1,8) + rd + opcode;
     ostringstream r;
+
     string machineInstructionHexStr = binToHex(machineInstruction);
+
     r << "0x" << machineInstructionHexStr << " , " << i[0] << " " << i[1] << ',' << i[2] << " # " << opcode << "-" << "NULL" << "-" << "NULL" << "-" << rd << "-" << "NULL" << "-" << "NULL" << "-" << imm << endl;
     return r.str();
 }
@@ -368,54 +444,51 @@ string handle_uj(const vector<string>& i){
 string secondPass(vector<vector<string>> v){
     stringstream outp;
     int off = 0;
-    char buffer[20];
+    char buffer[33];
     for (auto& i:v){
-        auto instruction_type = formats[i[0]];
+        auto instruction_type = formats.at(i[0]);
         string mc;
+    
         switch(instruction_type){
-            case (R_TYPE) : mc=handle_r(i); break;
-            case (I_TYPE) : mc=handle_i(i); break;
-            case (IL_TYPE) : mc=handle_il(i); break;
-            case (S_TYPE) : mc=handle_s(i); break;
-            case (SB_TYPE) : mc=handle_sb(i); break;
-            case (U_TYPE) : mc=handle_u(i); break;
-            case (UJ_TYPE) : mc=handle_uj(i); break;
+            case (R_TYPE) :  mc=handle_r(i); break;
+            case (I_TYPE) :  mc=handle_i(i); break;
+            case (IL_TYPE) :  mc=handle_il(i); break;
+            case (S_TYPE) :  mc=handle_s(i); break;
+            case (SB_TYPE) : ; mc=handle_sb(i); break;
+            case (U_TYPE) :  mc=handle_u(i); break;
+            case (UJ_TYPE) : ; mc=handle_uj(i); break;
         };
         sprintf(buffer, "%x", off);
-        outp << buffer << " " << mc;
+        outp << "0x" << buffer << " " << mc;
         off += 4;
     }
     outp << endl;
     return outp.str();
 }
 
-int mymain(){
-    cout << "in my main";
-    string t = "hello,i,am,here";
-    //sprintf(mcHex, "%x", iTemp);
-    auto iTemp = splitAt(',', t);
-    for(auto& i:iTemp){
-        cout << i << '\n';
-    }
-    cout << "out of my main";
-    return 0;
-}
-
 vector<vector<string>> dataPart(vector<string>&v){
     int dataline=0;
-    while(v[dataline]!=".data"){
+    while(dataline < v.size() && v[dataline].find(".data")==string::npos){
         dataline++;
     }
     v.erase(v.begin()+dataline);
+    int dstart = dataline;
     vector<vector<string>> data;
-    while (v[dataline] !=".text"){
+    while (dataline < v.size() && (v[dataline].find(".text") == string::npos)){
+        string line = v[dataline];
         v[dataline]= replaceChar(',',' ', v[dataline]);
         v[dataline]= replaceChar(':',' ', v[dataline]);
-        data.push_back(splitAt(' ',v[dataline]));
-        v.erase(v.begin()+dataline);
+        auto parts = splitAt(' ', line);
+        if (!parts.empty()) data.push_back(parts);
         dataline++;
     }
-    v.erase(v.begin()+dataline);
+    if (dataline < v.size())v.erase(v.begin() + dstart,v.begin()+dataline);
+    else v.erase(v.begin() + dstart, v.end());
+    dataline = 0;
+    while(dataline < v.size() && v[dataline].find(".text")==string::npos){
+        dataline++;
+    }
+    if (dataline < v.size())v.erase(v.begin()+dataline);
     return data;
 }
 
@@ -435,17 +508,35 @@ string  intToString(int  num){
 string dataReader(vector<vector<string>>data){
     string dataSeg;
     int address= dataStart;
-    for (vector<string> v: data){
-        v[0].erase(v[0].begin()+v[0].find(':'));
-        labelTable.insert({v[0],address});
-        int size= dataSize[(v[1])];
-        int n= v.size();
-        for(int i=2;i<n; i++){
-            int val= convertToDecimal(v[i]);
-            dataSeg = dataSeg+("0x"+intToHex(address)+" 0x"+intToHex(val)+"\n");
-            address = address+size;
+    int sizeStart = 1;
+    for (vector<string> v:data){
+        sizeStart = 1;
+        if (v.size() < 2 || trim(v[0]).empty()) continue;
+        if (v[0].find(':') != string::npos){
+            v[0].erase(v[0].begin()+v[0].find(':'));
+            labelTable.insert({v[0],address});
         }
-        if(v[1]==".asciz"){ //null pointer at end
+        else {
+            sizeStart--;
+        }
+        int size = dataSize.at(v[sizeStart]);
+        int n = v.size();
+        bool isNum = (v[sizeStart].find(".asciiz") == string::npos);
+        if (isNum){
+            for(int i=sizeStart+1;i<n; i++){
+                int val = convertToDecimal(v[i]);
+                dataSeg = dataSeg+("0x"+intToHex(address)+" 0x"+intToHex(val)+"\n");
+                address = address+size;
+            }
+        }
+        else{ //null pointer at end
+            for (auto c:v[sizeStart+1]){
+                if (c == '\"') continue;
+                int val = static_cast<unsigned int>(c);
+                dataSeg = dataSeg+("0x"+intToHex(address)+" 0x"+intToHex(val)+"\n");
+                address = address+size;
+            }
+
             dataSeg = dataSeg+("0x"+intToHex(address)+" 0x"+intToHex(0)+"\n");
             address= address+1;
         }
@@ -453,41 +544,71 @@ string dataReader(vector<vector<string>>data){
     return dataSeg;
 }
 
-
+void storeOutput(string output, string fileName){
+    ofstream outfile;
+    outfile.open(fileName);
+    if (outfile.is_open()){
+        outfile.write(output.c_str(), output.size());
+    }
+    else {
+        cout << "error opening output file" << endl;
+        exit(-11);
+    }
+    outfile.close();
+}
 
 int main(){
-    mymain();
-    string a;
-    getline(cin, a);
-    auto v = loadFile(a);
-    for(string s:v){
-        cout << s << '\n';
-    }
-    cout << endl;
+    string inputFileName = "input.asm";
+    cout << "trying to read input.asm" << endl;
+    //cout << "Enter the file name: ";
+    //getline(cin, inputFileName);
+    auto v = loadFile(inputFileName);
+    cout << "read input.asm" << endl;
+    cout << "processing." << flush;
     //handle .data and remove it form v and insert it 
-    vector <vector<string>> data= dataPart(v);
-    string dataSeg= dataReader(data); //data seg to be added at end of result
-
+    vector <vector<string>> data = dataPart(v);
+    cout << '.' << flush;
+    string dataSeg = dataReader(data); //data seg to be added at end of result
+    cout << '.' << flush;
     //lable with semicolen removed
     storeLable(v);
+    cout << '.' << flush;
     vector<vector<string>> instrc;
     for(string s : v){
         s = replaceChar(',', ' ',s);
         instrc.push_back(splitAt(' ',s));
     }
+    cout << '.' << flush;
 
     //replaicing lable in instructions with value in lableTable
+    int offset = 0;
     for(vector<string>&x:instrc){
         INSTRUCTION_TYPE t= formats[x[0]];
-        if (t=R_TYPE)continue;
+        if (t=R_TYPE){
+            offset += 4;
+            continue;
+        }
         string  *y=&x.back();
         auto temp = labelTable.find(*y);
-        if (temp==labelTable.end()) continue;
-        string replace = to_string(temp->second), lable=temp->first;
+        if (temp==labelTable.end()){
+            offset += 4;
+            continue;
+        }
+        string replace = to_string((temp->second) - offset), lable=temp->first;
         int pos= (*y).find(lable);
         (*y).replace(pos, lable.length(), replace);
+        offset += 4;
     }
+    cout << '.' << flush;
+    string textSeg = secondPass(instrc);
+    cout << '.' << endl;
+    string finalOut = textSeg + "\n\n<!============END OF CODE. DATA SEGMENT STARTS NOW============!>\n\n" + dataSeg;
 
+    cout << "writing to file" << endl;
+    string outputFileName = "output.mc";
+    storeOutput(finalOut, outputFileName);
+    cout << "finished!" << endl;
+    cout << endl;
     
     return 0;
 }

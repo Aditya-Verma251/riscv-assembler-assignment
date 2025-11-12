@@ -1,4 +1,10 @@
 *.exe
 *.pdf
-*cpp
+*.cpp
 !main.cpp
+.vscode
+.vscode/
+*.asm
+*.mc
+!input.asm
+!output.mc
