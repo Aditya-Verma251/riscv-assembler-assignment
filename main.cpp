@@ -91,8 +91,6 @@ unordered_map<string, tuple<string, string, string>> r_format = {
     {"remw", {"111011", "110", "0010000"}}
 };
 
-
-
 unordered_map<string, tuple<string, string>> i_format = {
     {"addi", {"0010011", "000"}}, {"andi", {"0010011", "111"}},
     {"ori",  {"0010011", "110"}}, {"lb",   {"0000011", "000"}},
@@ -118,6 +116,10 @@ unordered_map<string, string> u_format = {
 
 unordered_map<string, string> uj_format = {
     {"jal", "1101111"}
+};
+
+unordered_map<string, int> dataSize = {
+    {".byte", 1}, {".half", 2} , {".word", 4}, {".dword",8}, {".asciz",1}
 };
 
 unordered_map<string, int> labelTable;
@@ -399,10 +401,59 @@ int mymain(){
     return 0;
 }
 
-
-void handleData(vector<string>v){
-
+vector<vector<string>> dataPart(vector<string>&v){
+    int dataline=0;
+    while(v[dataline]!=".data"){
+        dataline++;
+    }
+    v.erase(v.begin()+dataline);
+    vector<vector<string>> data;
+    while (v[dataline] !=".text"){
+        v[dataline]= replaceChar(',',' ', v[dataline]);
+        v[dataline]= replaceChar(':',' ', v[dataline]);
+        data.push_back(splitAt(' ',v[dataline]));
+        v.erase(v.begin()+dataline);
+        dataline++;
+    }
+    v.erase(v.begin()+dataline);
+    return data;
 }
+
+string intToHex(int num) {
+    std::stringstream ss;
+    ss << hex;
+    ss << num;
+    return ss.str();
+}
+
+string  intToString(int  num){
+    stringstream  ss;
+    ss << num;
+    return  ss.str();
+}
+
+string dataReader(vector<vector<string>>data){
+    string dataSeg;
+    int address= dataStart;
+    for (vector<string> v: data){
+        v[0].erase(v[0].begin()+v[0].find(':'));
+        labelTable.insert({v[0],address});
+        int size= dataSize[(v[1])];
+        int n= v.size();
+        for(int i=2;i<n; i++){
+            int val= convertToDecimal(v[i]);
+            dataSeg = dataSeg+("0x"+intToHex(address)+" 0x"+intToHex(val)+"\n");
+            address = address+size;
+        }
+        if(v[1]==".asciz"){ //null pointer at end
+            dataSeg = dataSeg+("0x"+intToHex(address)+" 0x"+intToHex(0)+"\n");
+            address= address+1;
+        }
+    }
+    return dataSeg;
+}
+
+
 
 int main(){
     mymain();
@@ -414,15 +465,29 @@ int main(){
     }
     cout << endl;
     //handle .data and remove it form v and insert it 
+    vector <vector<string>> data= dataPart(v);
+    string dataSeg= dataReader(data); //data seg to be added at end of result
 
     //lable with semicolen removed
     storeLable(v);
-    
     vector<vector<string>> instrc;
-
     for(string s : v){
+        s = replaceChar(',', ' ',s);
         instrc.push_back(splitAt(' ',s));
     }
+
+    //replaicing lable in instructions with value in lableTable
+    for(vector<string>&x:instrc){
+        INSTRUCTION_TYPE t= formats[x[0]];
+        if (t=R_TYPE)continue;
+        string  *y=&x.back();
+        auto temp = labelTable.find(*y);
+        if (temp==labelTable.end()) continue;
+        string replace = to_string(temp->second), lable=temp->first;
+        int pos= (*y).find(lable);
+        (*y).replace(pos, lable.length(), replace);
+    }
+
     
     return 0;
 }
