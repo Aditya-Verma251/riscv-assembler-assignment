@@ -5,6 +5,10 @@
 #include <unordered_map>
 #include <cctype>
 #include <sstream>
+#include <tuple>
+#include <cstdlib>
+#include <cstdio>
+#include <cstdint>
 
 using namespace std;
 
@@ -13,7 +17,7 @@ struct mc{
 };
 
 enum INSTRUCTION_TYPE {
-    R_TYPE, I_TYPE, S_TYPE, SB_TYPE, U_TYPE, UJ_TYPE
+    R_TYPE, I_TYPE, S_TYPE, SB_TYPE, U_TYPE, UJ_TYPE, IL_TYPE
 };
 
 unordered_map<string, INSTRUCTION_TYPE> formats = {
@@ -38,10 +42,10 @@ unordered_map<string, INSTRUCTION_TYPE> formats = {
     {"addiw", I_TYPE},
     {"andi", I_TYPE}, 
     {"ori", I_TYPE}, 
-    {"lb", I_TYPE}, 
-    {"ld", I_TYPE}, 
-    {"lh", I_TYPE}, 
-    {"lw", I_TYPE}, 
+    {"lb", IL_TYPE}, 
+    {"ld", IL_TYPE}, 
+    {"lh", IL_TYPE}, 
+    {"lw", IL_TYPE}, 
     {"jalr", I_TYPE},
     {"sb", S_TYPE},
     {"sh", S_TYPE},
@@ -54,6 +58,24 @@ unordered_map<string, INSTRUCTION_TYPE> formats = {
     {"auipc", U_TYPE},
     {"lui", U_TYPE},
     {"jal", UJ_TYPE}
+};
+
+unordered_map<string, string> registers = {
+    {"x0", "00000"}, {"x1", "00001"}, {"x2", "00010"}, {"x3", "00011"},
+    {"x4", "00100"}, {"x5", "00101"}, {"x6", "00110"}, {"x7", "00111"},
+    {"x8", "01000"}, {"x9", "01001"}, {"x10", "01010"}, {"x11", "01011"},
+    {"x12", "01100"}, {"x13", "01101"}, {"x14", "01110"}, {"x15", "01111"},
+    {"x16", "10000"}, {"x17", "10001"}, {"x18", "10010"}, {"x19", "10011"},
+    {"x20", "10100"}, {"x21", "10101"}, {"x22", "10110"}, {"x23", "10111"},
+    {"x24", "11000"}, {"x25", "11001"}, {"x26", "11010"}, {"x27", "11011"},
+    {"x28", "11100"}, {"x29", "11101"}, {"x30", "11110"}, {"x31", "11111"},
+    {"sp", "00010"}, {"zero", "00000"}, {"ra", "00001"}, {"gp", "00011"},
+    {"tp", "00100"}, {"t0", "00101"}, {"t1", "00110"}, {"t2", "00111"},
+    {"s0", "01000"}, {"s1", "01001"}, {"a0", "01010"}, {"a1", "01011"}, {"a2", "01100"},
+    {"a3", "01101"}, {"a4", "01110"}, {"a5", "01111"}, {"a6", "10000"}, {"a7", "10001"},
+    {"s2", "10010"}, {"s3", "10011"}, {"s4", "10100"}, {"s5", "10101"}, {"s6", "10110"},
+    {"s7", "10111"}, {"s8", "11000"}, {"s9", "11001"}, {"s10", "11010"}, {"s11", "11011"},
+    {"t3", "11100"}, {"t4", "11101"}, {"t5", "11110"}, {"t6", "11111"}
 };
 
 unordered_map<string, tuple<string, string, string>> r_format = {
@@ -101,6 +123,7 @@ unordered_map<string, string> uj_format = {
 unordered_map<string, int> labelTable;
 
 const  int  dataStart = 0x10000000;
+const int stackStart =  0x7FFFFFDC;
 
 string ltrim(string s) {
     size_t i = 0;
@@ -146,13 +169,17 @@ string replaceChar(const char r,  const char t, string s){  // r gets repolaced 
 }
 
 auto splitAt(const  char  c, string  s){
-    vector<string>  r;
-    int  n;
-    while ((n  =  s.find(c))  != string::npos){
-        string t  = trim(s.substr(0, n));
+    vector<string> r;
+    size_t n;
+
+    while ((n = s.find(c)) != string::npos) {
+        string t = s.substr(0, n);
+        t = trim(t);
         if (!t.empty()) r.push_back(t);
-        s.erase(0, n);
+        s.erase(0, n + 1);
     }
+
+    if (!s.empty()) r.push_back(s);
     return r;
 }
 
@@ -181,43 +208,204 @@ int convertToDecimal(const string &num) {
     return stoi(num);
 }
 
-string handle_r(vector<string>& i){}
+string binToHex(string machineInstruction){
+    ostringstream machineInstructionHex;
+    char mcHex[20];
+    for (int i = 0; i < 32; i+=4){
+        string sTemp = machineInstruction.substr(i, 4);
+        uint32_t iTemp = stoi(machineInstruction, nullptr, 2);
+        //int iTemp;
+        sprintf(mcHex + i, "%x", iTemp);
+        machineInstructionHex << mcHex;
+    }
+    return machineInstructionHex.str();
+}
 
-string handle_i(vector<string>& i){}
+string handle_r(const vector<string>& i){
+    string opcode, rd, rs1, rs2, funct3, funct7;
+    tie(opcode, funct3, funct7) = r_format[i[0]];
+    rd = registers[i[1]];
+    rs1 = registers[i[2]];
+    rs2 = registers[i[3]];
+    string machineInstruction;
+    machineInstruction = funct7 + rs2 + rs1 + funct3 + rd + opcode;
+    ostringstream r;
+    string machineInstructionHexStr = binToHex(machineInstruction);
+    r << "0x" << machineInstructionHexStr << " , " << i[0] << " " << i[1] << ',' << i[2] << ',' << i[3] << " # " << opcode << "-" << funct3 << "-" << funct7 << "-" << rd << "-" << rs1 << "-" << rs2 << "-" << "NULL" << endl;
+    return r.str();
+}
 
-string handle_s(vector<string>& i){}
+string handle_i(const vector<string>& i){
+    string opcode, rd, rs1, imm, funct3;
+    tie(opcode, funct3) = i_format[i[0]];
+    rd = registers[i[1]];
+    rs1 = registers[i[2]];
+    imm = i[3];
+    int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
+    char buffer[20];
+    sprintf(buffer, "%b", iImm);
+    imm = buffer;
+    while (imm.length() < 12) imm = "0" + imm;
+    if (imm.length() > 12) imm.erase(0, imm.length() - 12);
+    string machineInstruction = imm + rs1 + funct3 + rd + opcode;
+    ostringstream r;
+    string machineInstructionHexStr = binToHex(machineInstruction);
+    r << "0x" << machineInstructionHexStr << " , " << i[0] << " " << i[1] << ',' << i[2] << ',' << i[3] << " # " << opcode << "-" << funct3 << "-" << "NULL" << "-" << rd << "-" << rs1 << "-" << "NULL" << "-" << imm << endl;
+    return r.str();
+}
 
-string handle_sb(vector<string>& i){}
+string handle_il(const vector<string>& j){
+    vector<string> i;
+    i.push_back(j[0]);
+    i.push_back(j[1]);
+    auto t = splitAt('(', j[2]);
+    auto t2 = splitAt(')', t[1]);
+    t.pop_back();
+    for (auto& t3:t2) t.push_back(t3);
+    for (auto& t3:t) i.push_back(t3);
+    string opcode, rd, rs1, imm, funct3;
+    tie(opcode, funct3) = i_format[i[0]];
+    rd = registers[i[1]];
+    rs1 = registers[i[3]];
+    imm = i[2];
+    int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
+    char buffer[20];
+    sprintf(buffer, "%b", iImm);
+    imm = buffer;
+    while (imm.length() < 12) imm = "0" + imm;
+    if (imm.length() > 12) imm.erase(0, imm.length() - 12);
+    string machineInstruction = imm + rs1 + funct3 + rd + opcode;
+    ostringstream r;
+    string machineInstructionHexStr = binToHex(machineInstruction);
+    r << "0x" << machineInstructionHexStr << " , " << j[0] << " " << j[1] << ',' << j[2] << " # " << opcode << "-" << funct3 << "-" << "NULL" << "-" << rd << "-" << rs1 << "-" << "NULL" << "-" << imm << endl;
+    return r.str();
+}
 
-string handle_u(vector<string>& i){}
+string handle_s(const vector<string>& j){
+    vector<string> i;
+    i.push_back(j[0]);
+    i.push_back(j[1]);
+    auto t = splitAt('(', j[2]);
+    auto t2 = splitAt(')', t[1]);
+    t.pop_back();
+    for (auto& t3:t2) t.push_back(t3);
+    for (auto& t3:t) i.push_back(t3);
+    string opcode, rs1, rs2, imm, funct3;
+    tie(opcode, funct3) = s_format[i[0]];
+    rs1 = registers[i[3]];
+    rs2 = registers[i[1]];
+    imm = i[2];
+    int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
+    char buffer[20];
+    sprintf(buffer, "%b", iImm);
+    imm = buffer;
+    while (imm.length() < 12) imm = "0" + imm;
+    if (imm.length() > 12) imm.erase(0, imm.length() - 12);
+    string machineInstruction = imm.substr(0, 7) + rs2 + rs1 + funct3 + imm.substr(7, 5) + opcode;
+    ostringstream r;
+    string machineInstructionHexStr = binToHex(machineInstruction);
+    r << "0x" << machineInstructionHexStr << " , " << j[0] << " " << j[1] << ',' << j[2] << " # " << opcode << "-" << funct3 << "-" << "NULL" << "-" << "NULL" << "-" << rs1 << "-" << rs2 << "-" << imm << endl;
+    return r.str();
+}
 
-string handle_uj(vector<string>& i){}
+string handle_sb(const vector<string>& i){
+    string opcode, rs1, rs2, imm, funct3;
+    tie(opcode, funct3) = sb_format[i[0]];
+    rs1 = registers[i[1]];
+    rs1 = registers[i[2]];
+    imm = i[3];
+    int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
+    char buffer[20];
+    sprintf(buffer, "%b", iImm);
+    imm = buffer;
+    while (imm.length() < 13) imm = "0" + imm;
+    if (imm.length() > 13) imm.erase(0, imm.length() - 13);
+    string machineInstruction = imm[0] + imm.substr(2, 6) + rs2 + rs1 + funct3 + imm.substr(8, 4) + imm[1] + opcode;
+    ostringstream r;
+    string machineInstructionHexStr = binToHex(machineInstruction);
+    r << "0x" << machineInstructionHexStr << " , " << i[0] << " " << i[1] << ',' << i[2] << ',' << i[3] << " # " << opcode << "-" << funct3 << "-" << "NULL" << "-" << "NULL" << "-" << rs1 << "-" << rs2 << "-" << imm << endl;
+    return r.str();
+}
 
-int secondPass(vector<vector<string>> v, string outputFileName){
+string handle_u(const vector<string>& i){
+    string opcode, rd, imm;
+    opcode = u_format[i[0]];
+    rd = registers[i[1]];
+    imm = i[2];
+    int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
+    char buffer[20];
+    sprintf(buffer, "%b", iImm);
+    imm = buffer;
+    while (imm.length() < 20) imm = "0" + imm;
+    if (imm.length() > 20) imm.erase(0, imm.length() - 20);
+    string machineInstruction = imm + rd + opcode;
+    ostringstream r;
+    string machineInstructionHexStr = binToHex(machineInstruction);
+    r << "0x" << machineInstructionHexStr << " , " << i[0] << " " << i[1] << ',' << i[2] << " # " << opcode << "-" << "NULL" << "-" << "NULL" << "-" << rd << "-" << "NULL" << "-" << "NULL" << "-" << imm << endl;
+    return r.str();
+}
+
+string handle_uj(const vector<string>& i){
+    string opcode, rd, imm;
+    opcode = u_format[i[0]];
+    rd = registers[i[1]];
+    imm = i[2];
+    int iImm = (imm.substr(0, 2) == "0x") ? convertToDecimal(imm) : stoi(imm);
+    char buffer[20];
+    sprintf(buffer, "%b", iImm);
+    imm = buffer;
+    while (imm.length() < 21) imm = "0" + imm;
+    if (imm.length() > 21) imm.erase(0, imm.length() - 21);
+    string machineInstruction = imm[0] + imm.substr(10, 10) + imm[9] + imm.substr(1,8) + rd + opcode;
+    ostringstream r;
+    string machineInstructionHexStr = binToHex(machineInstruction);
+    r << "0x" << machineInstructionHexStr << " , " << i[0] << " " << i[1] << ',' << i[2] << " # " << opcode << "-" << "NULL" << "-" << "NULL" << "-" << rd << "-" << "NULL" << "-" << "NULL" << "-" << imm << endl;
+    return r.str();
+}
+
+string secondPass(vector<vector<string>> v){
     stringstream outp;
     int off = 0;
+    char buffer[20];
     for (auto& i:v){
         auto instruction_type = formats[i[0]];
         string mc;
         switch(instruction_type){
             case (R_TYPE) : mc=handle_r(i); break;
             case (I_TYPE) : mc=handle_i(i); break;
+            case (IL_TYPE) : mc=handle_il(i); break;
             case (S_TYPE) : mc=handle_s(i); break;
             case (SB_TYPE) : mc=handle_sb(i); break;
             case (U_TYPE) : mc=handle_u(i); break;
             case (UJ_TYPE) : mc=handle_uj(i); break;
         };
+        sprintf(buffer, "%x", off);
+        outp << buffer << " " << mc;
         off += 4;
     }
+    outp << endl;
+    return outp.str();
 }
 
 int mymain(){
+    cout << "in my main";
+    string t = "hello,i,am,here";
+    //sprintf(mcHex, "%x", iTemp);
+    auto iTemp = splitAt(',', t);
+    for(auto& i:iTemp){
+        cout << i << '\n';
+    }
+    cout << "out of my main";
     return 0;
+}
+
+
 void handleData(vector<string>v){
 
 }
 
 int main(){
+    mymain();
     string a;
     getline(cin, a);
     auto v = loadFile(a);
@@ -232,7 +420,6 @@ int main(){
     
     vector<vector<string>> instrc;
 
-    mymain();
     for(string s : v){
         instrc.push_back(splitAt(' ',s));
     }
